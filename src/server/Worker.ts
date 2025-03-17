@@ -4,7 +4,10 @@ import { WebSocketServer } from "ws";
 import path from "path";
 import { fileURLToPath } from "url";
 import { GameManager } from "./GameManager";
-import { getServerConfigFromServer } from "../core/configuration/Config";
+import {
+  GameEnv,
+  getServerConfigFromServer,
+} from "../core/configuration/Config";
 import { WebSocket } from "ws";
 import { Client } from "./Client";
 import rateLimit from "express-rate-limit";
@@ -12,7 +15,7 @@ import { RateLimiterMemory } from "rate-limiter-flexible";
 import { GameConfig, GameRecord, LogSeverity } from "../core/Schemas";
 import { slog } from "./StructuredLog";
 import { GameType } from "../core/game/Game";
-import { archive } from "./Archive";
+import { archive, readGameRecord } from "./Archive";
 import { gatekeeper, LimiterType } from "./Gatekeeper";
 
 const config = getServerConfigFromServer();
@@ -67,7 +70,6 @@ export function startWorker() {
     }),
   );
 
-  // Endpoint to create a private lobby
   app.post(
     "/api/create_game/:id",
     gatekeeper.httpHandler(LimiterType.Post, async (req, res) => {
@@ -175,9 +177,48 @@ export function startWorker() {
       const game = gm.game(req.params.id);
       if (game == null) {
         console.log(`lobby ${req.params.id} not found`);
-        return res.status(404).json({ error: "Game not found" });
+        return res.status(404);
       }
       res.json(game.gameInfo());
+    }),
+  );
+
+  app.get(
+    "/api/archived_game/:id",
+    gatekeeper.httpHandler(LimiterType.Get, async (req, res) => {
+      const gameRecord = await readGameRecord(req.params.id);
+
+      if (!gameRecord) {
+        return res.status(404).json({
+          success: false,
+          error: "Game not found",
+          exists: false,
+        });
+      }
+
+      if (
+        config.env() != GameEnv.Dev &&
+        gameRecord.gitCommit != config.gitCommit()
+      ) {
+        console.warn(
+          `git commit mismatch for game ${req.params.id}, expected ${config.gitCommit()}, got ${gameRecord.gitCommit}`,
+        );
+        return res.status(409).json({
+          success: false,
+          error: "Version mismatch",
+          exists: true,
+          details: {
+            expectedCommit: config.gitCommit(),
+            actualCommit: gameRecord.gitCommit,
+          },
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        exists: true,
+        gameRecord: gameRecord,
+      });
     }),
   );
 
@@ -208,7 +249,7 @@ export function startWorker() {
         const forwarded = req.headers["x-forwarded-for"];
         const ip = Array.isArray(forwarded)
           ? forwarded[0]
-          : forwarded || req.socket.remoteAddress;
+          : forwarded || req.socket.remoteAddress || "unknown";
 
         try {
           // Process WebSocket messages as in your original code
@@ -266,9 +307,6 @@ export function startWorker() {
       }
     });
   });
-
-  // Set up ticker
-  setInterval(() => gm.tick(), 1000);
 
   // The load balancer will handle routing to this server based on path
   const PORT = config.workerPortByIndex(workerId);

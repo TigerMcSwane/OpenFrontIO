@@ -149,7 +149,7 @@ export class WinModal extends LitElement implements Layer {
     return html`
       <div class="win-modal ${this.isVisible ? "visible" : ""}">
         <h2>${this._title || ""}</h2>
-        ${this.won ? this.supportHTML() : this.adsHTML()}
+        ${this.supportHTML()}
         <div class="button-container">
           <button @click=${this._handleExit}>Exit Game</button>
           <button @click=${this.hide}>Keep Playing</button>
@@ -170,17 +170,6 @@ export class WinModal extends LitElement implements Layer {
         console.error("Error initializing ad:", error);
       }
     }
-  }
-
-  adsHTML() {
-    return html`<ins
-      class="adsbygoogle"
-      style="display:block"
-      data-ad-client="ca-pub-7035513310742290"
-      data-ad-slot="winmodalad"
-      data-ad-format="auto"
-      data-full-width-responsive="true"
-    ></ins>`;
   }
 
   supportHTML() {

@@ -88,6 +88,8 @@ export class PublicLobby extends LitElement {
     const minutes = Math.floor(timeRemaining / 60);
     const seconds = timeRemaining % 60;
     const timeDisplay = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+    const playersRemainingBeforeMax =
+      lobby.gameConfig.maxPlayers - lobby.numClients;
 
     return html`
       <button
@@ -118,8 +120,8 @@ export class PublicLobby extends LitElement {
             </div>
             <div class="flex flex-col items-start">
               <div class="text-md font-medium text-blue-100">
-                ${lobby.numClients}
-                ${lobby.numClients === 1 ? "Player" : "Players"} waiting
+                ${lobby.numClients} / ${lobby.gameConfig.maxPlayers} players
+                waiting
               </div>
             </div>
             <div class="flex items-center">
@@ -158,12 +160,7 @@ export class PublicLobby extends LitElement {
       this.currLobby = lobby;
       this.dispatchEvent(
         new CustomEvent("join-lobby", {
-          detail: {
-            lobby,
-            gameType: GameType.Public,
-            map: GameMapType.World,
-            difficulty: Difficulty.Medium,
-          },
+          detail: lobby,
           bubbles: true,
           composed: true,
         }),

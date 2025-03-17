@@ -69,9 +69,11 @@ export interface UnitUpdate {
   pos: TileRef;
   lastPos: TileRef;
   isActive: boolean;
+  dstPortId?: number; // Only for trade ships
+  detonationDst?: TileRef; // Only for nukes
+  warshipTargetId?: number;
   health?: number;
   constructionType?: UnitType;
-  targetId?: number;
 }
 
 export interface AttackUpdate {

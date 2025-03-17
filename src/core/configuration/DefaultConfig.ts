@@ -1,6 +1,7 @@
 import {
   Difficulty,
   Game,
+  GameMapType,
   GameType,
   Gold,
   Player,
@@ -12,7 +13,7 @@ import {
   UnitInfo,
   UnitType,
 } from "../game/Game";
-import { TileRef } from "../game/GameMap";
+import { GameMap, TileRef } from "../game/GameMap";
 import { PlayerView } from "../game/GameView";
 import { UserSettings } from "../game/UserSettings";
 import { GameConfig, GameID } from "../Schemas";
@@ -22,6 +23,19 @@ import { pastelTheme } from "./PastelTheme";
 import { pastelThemeDark } from "./PastelThemeDark";
 
 export abstract class DefaultServerConfig implements ServerConfig {
+  gitCommit(): string {
+    return process.env.GIT_COMMIT;
+  }
+  r2Endpoint(): string {
+    return process.env.R2_ENDPOINT;
+  }
+  r2AccessKey(): string {
+    return process.env.R2_ACCESS_KEY;
+  }
+  r2SecretKey(): string {
+    return process.env.R2_SECRET_KEY;
+  }
+  abstract r2Bucket(): string;
   adminHeader(): string {
     return "x-admin-key";
   }
@@ -34,15 +48,19 @@ export abstract class DefaultServerConfig implements ServerConfig {
   turnIntervalMs(): number {
     return 100;
   }
-  gameCreationRate(highTraffic: boolean): number {
-    if (highTraffic) {
-      return 20 * 1000;
-    } else {
-      return 50 * 1000;
-    }
+  gameCreationRate(): number {
+    return 30 * 1000;
   }
-  lobbyLifetime(highTraffic: boolean): number {
-    return this.gameCreationRate(highTraffic) * 2;
+  lobbyMaxPlayers(map: GameMapType): number {
+    if (map == GameMapType.World) {
+      return Math.random() < 0.3 ? 150 : 60;
+    }
+    if (
+      [GameMapType.Mars, GameMapType.Africa, GameMapType.BlackSea].includes(map)
+    ) {
+      return Math.random() < 0.3 ? 70 : 50;
+    }
+    return Math.random() < 0.3 ? 60 : 40;
   }
   workerIndex(gameID: GameID): number {
     return simpleHash(gameID) % this.numWorkers();
@@ -101,8 +119,10 @@ export class DefaultConfig implements Config {
     return 250_000;
   }
 
-  falloutDefenseModifier(): number {
-    return 5;
+  falloutDefenseModifier(falloutRatio: number): number {
+    // falloutRatio is between 0 and 1
+    // So defense modifier is between [5, 2.5]
+    return 5 - falloutRatio * 2;
   }
 
   defensePostRange(): number {
@@ -127,10 +147,15 @@ export class DefaultConfig implements Config {
     return this._gameConfig.infiniteTroops;
   }
   tradeShipGold(dist: number): Gold {
-    return 10000 + 100 * Math.pow(dist, 1.1);
+    return 10000 + 150 * Math.pow(dist, 1.1);
   }
-  tradeShipSpawnRate(): number {
-    return 700;
+  tradeShipSpawnRate(numberOfPorts: number): number {
+    if (numberOfPorts <= 3) return 180;
+    if (numberOfPorts <= 5) return 250;
+    if (numberOfPorts <= 8) return 350;
+    if (numberOfPorts <= 10) return 400;
+    if (numberOfPorts <= 12) return 450;
+    return 500;
   }
 
   unitInfo(type: UnitType): UnitInfo {
@@ -158,6 +183,11 @@ export class DefaultConfig implements Config {
           cost: () => 0,
           territoryBound: false,
           damage: 250,
+        };
+      case UnitType.SAMMissile:
+        return {
+          cost: () => 0,
+          territoryBound: false,
         };
       case UnitType.Port:
         return {
@@ -225,6 +255,20 @@ export class DefaultConfig implements Config {
           territoryBound: true,
           constructionDuration: this.instantBuild() ? 0 : 5 * 10,
         };
+      case UnitType.SAMLauncher:
+        return {
+          cost: (p: Player) =>
+            p.type() == PlayerType.Human && this.infiniteGold()
+              ? 0
+              : Math.min(
+                  1_500_000 * 3,
+                  (p.unitsIncludingConstruction(UnitType.SAMLauncher).length +
+                    1) *
+                    1_500_000,
+                ),
+          territoryBound: true,
+          constructionDuration: this.instantBuild() ? 0 : 30 * 10,
+        };
       case UnitType.City:
         return {
           cost: (p: Player) =>
@@ -271,7 +315,7 @@ export class DefaultConfig implements Config {
     return 30 * 10;
   }
   allianceDuration(): Tick {
-    return 240 * 10; // 4 minutes
+    return 600 * 10; // 10 minutes.
   }
   percentageTilesOwnedToWin(): number {
     return 80;
@@ -305,8 +349,8 @@ export class DefaultConfig implements Config {
     const type = gm.terrainType(tileToConquer);
     switch (type) {
       case TerrainType.Plains:
-        mag = 80;
-        speed = 15;
+        mag = 85;
+        speed = 16.5;
         break;
       case TerrainType.Highland:
         mag = 100;
@@ -330,8 +374,9 @@ export class DefaultConfig implements Config {
     }
 
     if (gm.hasFallout(tileToConquer)) {
-      mag *= this.falloutDefenseModifier();
-      speed *= this.falloutDefenseModifier();
+      const falloutRatio = gm.numTilesWithFallout() / gm.numLandTiles();
+      mag *= this.falloutDefenseModifier(falloutRatio);
+      speed *= this.falloutDefenseModifier(falloutRatio);
     }
 
     if (attacker.isPlayer() && defender.isPlayer()) {
@@ -350,21 +395,21 @@ export class DefaultConfig implements Config {
     }
 
     let largeModifier = 1;
-    if (attacker.numTilesOwned() > 50_000) {
-      largeModifier = Math.sqrt(50_000 / attacker.numTilesOwned());
+    if (attacker.numTilesOwned() > 100_000) {
+      largeModifier = Math.sqrt(100_000 / attacker.numTilesOwned());
     }
 
     if (defender.isPlayer()) {
       return {
         attackerTroopLoss:
-          within(defender.troops() / attackTroops, 0.5, 2) *
+          within(defender.troops() / attackTroops, 0.6, 2) *
           mag *
           0.8 *
           largeModifier *
           (defender.isTraitor() ? this.traitorDefenseDebuff() : 1),
         defenderTroopLoss: defender.troops() / defender.numTilesOwned(),
         tilesPerTickUsed:
-          within(defender.troops() / (5 * attackTroops), 0.2, 1.5) *
+          within(defender.troops() / (4 * attackTroops), 0.2, 1.5) *
           speed *
           largeModifier,
       };

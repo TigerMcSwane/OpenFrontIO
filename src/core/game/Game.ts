@@ -71,22 +71,27 @@ export enum UnitType {
   TransportShip = "Transport",
   Warship = "Warship",
   Shell = "Shell",
+  SAMMissile = "SAMMissile",
   Port = "Port",
   AtomBomb = "Atom Bomb",
   HydrogenBomb = "Hydrogen Bomb",
   TradeShip = "Trade Ship",
   MissileSilo = "Missile Silo",
   DefensePost = "Defense Post",
+  SAMLauncher = "SAM Launcher",
   City = "City",
   MIRV = "MIRV",
   MIRVWarhead = "MIRV Warhead",
   Construction = "Construction",
 }
-export type NukeType =
-  | UnitType.AtomBomb
-  | UnitType.HydrogenBomb
-  | UnitType.MIRVWarhead
-  | UnitType.MIRV;
+
+export const nukeTypes = [
+  UnitType.AtomBomb,
+  UnitType.HydrogenBomb,
+  UnitType.MIRVWarhead,
+  UnitType.MIRV,
+] as UnitType[];
+export type NukeType = (typeof nukeTypes)[number];
 
 export enum Relation {
   Hostile = 0,
@@ -199,6 +204,13 @@ export class PlayerInfo {
   ) {}
 }
 
+// Some units have info specific to them
+export interface UnitSpecificInfos {
+  dstPort?: Unit; // Only for trade ships
+  detonationDst?: TileRef; // Only for nukes
+  warshipTarget?: Unit;
+}
+
 export interface Unit {
   id(): number;
 
@@ -218,9 +230,16 @@ export interface Unit {
   hasHealth(): boolean;
   health(): number;
   modifyHealth(delta: number): void;
-  // State for warships (currently)
-  setTarget(target: Unit): void;
-  target(): Unit;
+
+  setWarshipTarget(target: Unit): void; // warship only
+  warshipTarget(): Unit;
+
+  setDstPort(dstPort: Unit): void;
+  dstPort(): Unit; // Only for trade ships
+  detonationDst(): TileRef; // Only for nukes
+
+  setMoveTarget(cell: TileRef): void;
+  moveTarget(): TileRef | null;
 
   // Mutations
   setTroops(troops: number): void;
@@ -232,9 +251,6 @@ export interface Unit {
 
   // Updates
   toUpdate(): UnitUpdate;
-
-  // Only for some types, otherwise return null
-  dstPort(): Unit;
 }
 
 export interface TerraNullius {
@@ -292,7 +308,7 @@ export interface Player {
     type: UnitType,
     troops: number,
     tile: TileRef,
-    dstPort?: Unit,
+    unitSpecificInfos?: UnitSpecificInfos,
   ): Unit;
   captureUnit(unit: Unit): void;
 

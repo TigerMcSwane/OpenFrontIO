@@ -100,16 +100,8 @@ export function closestShoreFromPlayer(
   }
 
   return shoreTiles.reduce((closest, current) => {
-    const closestDistance = manhattanDistWrapped(
-      gm.cell(target),
-      gm.cell(closest),
-      gm.width(),
-    );
-    const currentDistance = manhattanDistWrapped(
-      gm.cell(target),
-      gm.cell(current),
-      gm.width(),
-    );
+    const closestDistance = gm.manhattanDist(target, closest);
+    const currentDistance = gm.manhattanDist(target, current);
     return currentDistance < closestDistance ? current : closest;
   });
 }
@@ -255,7 +247,7 @@ export function onlyImages(html: string) {
   });
 }
 
-export function CreateGameRecord(
+export function createGameRecord(
   id: GameID,
   gameConfig: GameConfig,
   // username does not need to be set.
@@ -278,7 +270,7 @@ export function CreateGameRecord(
   };
 
   for (const turn of turns) {
-    if (turn.intents.length != 0) {
+    if (turn.intents.length != 0 || turn.hash != undefined) {
       record.turns.push(turn);
       for (const intent of turn.intents) {
         if (intent.type == "spawn") {
@@ -298,6 +290,33 @@ export function CreateGameRecord(
   record.num_turns = turns.length;
   record.winner = winner;
   return record;
+}
+
+export function decompressGameRecord(gameRecord: GameRecord) {
+  const turns = [];
+  let lastTurnNum = -1;
+  for (const turn of gameRecord.turns) {
+    while (lastTurnNum < turn.turnNumber - 1) {
+      lastTurnNum++;
+      turns.push({
+        gameID: gameRecord.id,
+        turnNumber: lastTurnNum,
+        intents: [],
+      });
+    }
+    turns.push(turn);
+    lastTurnNum = turn.turnNumber;
+  }
+  const turnLength = turns.length;
+  for (let i = turnLength; i < gameRecord.num_turns; i++) {
+    turns.push({
+      gameID: gameRecord.id,
+      turnNumber: i,
+      intents: [],
+    });
+  }
+  gameRecord.turns = turns;
+  return gameRecord;
 }
 
 export function assertNever(x: never): never {

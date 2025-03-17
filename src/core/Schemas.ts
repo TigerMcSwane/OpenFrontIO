@@ -24,7 +24,8 @@ export type Intent =
   | DonateIntent
   | TargetTroopRatioIntent
   | BuildUnitIntent
-  | EmbargoIntent;
+  | EmbargoIntent
+  | MoveWarshipIntent;
 
 export type AttackIntent = z.infer<typeof AttackIntentSchema>;
 export type CancelAttackIntent = z.infer<typeof CancelAttackIntentSchema>;
@@ -43,6 +44,7 @@ export type TargetTroopRatioIntent = z.infer<
   typeof TargetTroopRatioIntentSchema
 >;
 export type BuildUnitIntent = z.infer<typeof BuildUnitIntentSchema>;
+export type MoveWarshipIntent = z.infer<typeof MoveWarshipIntentSchema>;
 
 export type Turn = z.infer<typeof TurnSchema>;
 export type GameConfig = z.infer<typeof GameConfigSchema>;
@@ -110,6 +112,7 @@ const GameConfigSchema = z.object({
   infiniteGold: z.boolean(),
   infiniteTroops: z.boolean(),
   instantBuild: z.boolean(),
+  maxPlayers: z.number().optional(),
 });
 
 const SafeString = z
@@ -163,6 +166,7 @@ const BaseIntentSchema = z.object({
     "troop_ratio",
     "build_unit",
     "embargo",
+    "move_warship",
   ]),
   clientID: ID,
   playerID: ID,
@@ -260,6 +264,12 @@ export const CancelAttackIntentSchema = BaseIntentSchema.extend({
   attackID: z.string(),
 });
 
+export const MoveWarshipIntentSchema = BaseIntentSchema.extend({
+  type: z.literal("move_warship"),
+  unitId: z.number(),
+  tile: z.number(),
+});
+
 const IntentSchema = z.union([
   AttackIntentSchema,
   CancelAttackIntentSchema,
@@ -274,12 +284,15 @@ const IntentSchema = z.union([
   TargetTroopRatioIntentSchema,
   BuildUnitIntentSchema,
   EmbargoIntentSchema,
+  MoveWarshipIntentSchema,
 ]);
 
 export const TurnSchema = z.object({
   turnNumber: z.number(),
   gameID: ID,
   intents: z.array(IntentSchema),
+  // The hash of the game state at the end of the turn.
+  hash: z.number().nullable().optional(),
 });
 
 // Server
@@ -310,6 +323,7 @@ export const ServerDesyncSchema = ServerBaseMessageSchema.extend({
   correctHash: z.number().nullable(),
   clientsWithCorrectHash: z.number(),
   totalActiveClients: z.number(),
+  yourHash: z.number().optional(),
 });
 
 export const ServerMessageSchema = z.union([
@@ -337,7 +351,7 @@ export const ClientSendWinnerSchema = ClientBaseMessageSchema.extend({
 export const ClientHashSchema = ClientBaseMessageSchema.extend({
   type: z.literal("hash"),
   hash: z.number(),
-  tick: z.number(),
+  turnNumber: z.number(),
 });
 
 export const ClientLogMessageSchema = ClientBaseMessageSchema.extend({
@@ -392,4 +406,5 @@ export const GameRecordSchema = z.object({
   winner: ID.nullable(),
   allPlayersStats: z.record(ID, PlayerStatsSchema),
   version: z.enum(["v0.0.1"]),
+  gitCommit: z.string().nullable().optional(),
 });

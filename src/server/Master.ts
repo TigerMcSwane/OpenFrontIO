@@ -8,11 +8,10 @@ import {
   GameEnv,
   getServerConfigFromServer,
 } from "../core/configuration/Config";
-import { GameInfo } from "../core/Schemas";
+import { GameConfig, GameInfo } from "../core/Schemas";
 import path from "path";
 import rateLimit from "express-rate-limit";
 import { fileURLToPath } from "url";
-import { isHighTrafficTime } from "./Util";
 import { gatekeeper, LimiterType } from "./Gatekeeper";
 
 const config = getServerConfigFromServer();
@@ -30,8 +29,10 @@ app.use(
     setHeaders: (res, path) => {
       // You can conditionally set different cache times based on file types
       if (path.endsWith(".html")) {
-        // HTML files get shorter cache time
-        res.setHeader("Cache-Control", "public, max-age=60");
+        // Set HTML files to no-cache to ensure Express doesn't send 304s
+        res.setHeader("Cache-Control", "no-cache, must-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
       } else if (path.match(/\.(js|css|svg)$/)) {
         // JS, CSS, SVG get long cache with immutable
         res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
@@ -88,27 +89,21 @@ export async function startMaster() {
       if (readyWorkers.size === config.numWorkers()) {
         console.log("All workers ready, starting game scheduling");
 
-        // Safe implementation of dynamic interval
-        let timeoutId = null;
-
         const scheduleLobbies = () => {
-          schedulePublicGame()
-            .catch((error) => {
-              console.error("Error scheduling public game:", error);
-            })
-            .finally(() => {
-              // Schedule next run with the current config value
-              const currentLifetime =
-                config.gameCreationRate(isHighTrafficTime());
-              timeoutId = setTimeout(scheduleLobbies, currentLifetime);
-            });
+          schedulePublicGame().catch((error) => {
+            console.error("Error scheduling public game:", error);
+          });
         };
 
-        // Run first execution immediately
-        scheduleLobbies();
-
-        // Regular interval for fetching lobbies
-        setInterval(() => fetchLobbies(), 250);
+        setInterval(
+          () =>
+            fetchLobbies().then((lobbies) => {
+              if (lobbies == 0) {
+                scheduleLobbies();
+              }
+            }),
+          100,
+        );
       }
     }
   });
@@ -160,7 +155,7 @@ app.get(
   }),
 );
 
-async function fetchLobbies(): Promise<void> {
+async function fetchLobbies(): Promise<number> {
   const fetchPromises = [];
 
   for (const gameID of publicLobbyIDs) {
@@ -197,7 +192,7 @@ async function fetchLobbies(): Promise<void> {
     });
 
   lobbyInfos.forEach((l) => {
-    if (l.msUntilStart <= 250) {
+    if (l.msUntilStart <= 250 || l.gameConfig.maxPlayers == l.numClients) {
       publicLobbyIDs.delete(l.gameID);
     }
   });
@@ -206,15 +201,19 @@ async function fetchLobbies(): Promise<void> {
   publicLobbiesJsonStr = JSON.stringify({
     lobbies: lobbyInfos,
   });
+
+  return publicLobbyIDs.size;
 }
 
 // Function to schedule a new public game
 async function schedulePublicGame() {
   const gameID = generateID();
+  const map = getNextMap();
   publicLobbyIDs.add(gameID);
   // Create the default public game config (from your GameManager)
   const defaultGameConfig = {
-    gameMap: getNextMap(),
+    gameMap: map,
+    maxPlayers: config.lobbyMaxPlayers(map),
     gameType: GameType.Public,
     difficulty: Difficulty.Medium,
     infiniteGold: false,
@@ -222,7 +221,7 @@ async function schedulePublicGame() {
     instantBuild: false,
     disableNPCs: false,
     bots: 400,
-  };
+  } as GameConfig;
 
   const workerPath = config.workerPath(gameID);
 
@@ -267,14 +266,15 @@ function getNextMap(): GameMapType {
   }
 
   const frequency = {
-    World: 4,
-    Europe: 4,
+    World: 3,
+    Europe: 3,
     Mena: 2,
     NorthAmerica: 2,
     BlackSea: 2,
     Africa: 2,
     Asia: 2,
     Mars: 2,
+    Britannia: 2,
   };
 
   Object.keys(GameMapType).forEach((key) => {

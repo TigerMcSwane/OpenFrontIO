@@ -18,6 +18,7 @@ import {
   EmojiMessage,
   PlayerProfile,
   Attack,
+  UnitSpecificInfos,
 } from "./Game";
 import { AttackUpdate, PlayerUpdate } from "./GameUpdates";
 import { GameUpdateType } from "./GameUpdates";
@@ -539,7 +540,9 @@ export class PlayerImpl implements Player {
   }
 
   canTrade(other: Player): boolean {
-    return !other.hasEmbargoAgainst(this) && !this.hasEmbargoAgainst(other);
+    const embargo =
+      other.hasEmbargoAgainst(this) || this.hasEmbargoAgainst(other);
+    return !embargo && other.id() != this.id();
   }
 
   addEmbargo(other: PlayerID): void {
@@ -646,7 +649,7 @@ export class PlayerImpl implements Player {
     type: UnitType,
     troops: number,
     spawnTile: TileRef,
-    dstPort?: Unit,
+    unitSpecificInfos: UnitSpecificInfos = {},
   ): UnitImpl {
     const cost = this.mg.unitInfo(type).cost(this);
     const b = new UnitImpl(
@@ -656,7 +659,7 @@ export class PlayerImpl implements Player {
       troops,
       this.mg.nextUnitID(),
       this,
-      dstPort,
+      unitSpecificInfos,
     );
     this._units.push(b);
     this.removeGold(cost);
@@ -689,6 +692,7 @@ export class PlayerImpl implements Player {
       case UnitType.Warship:
         return this.warshipSpawn(targetTile);
       case UnitType.Shell:
+      case UnitType.SAMMissile:
         return targetTile;
       case UnitType.TransportShip:
         return this.transportShipSpawn(targetTile);
@@ -696,6 +700,7 @@ export class PlayerImpl implements Player {
         return this.tradeShipSpawn(targetTile);
       case UnitType.MissileSilo:
       case UnitType.DefensePost:
+      case UnitType.SAMLauncher:
       case UnitType.City:
       case UnitType.Construction:
         return this.landBasedStructureSpawn(targetTile);

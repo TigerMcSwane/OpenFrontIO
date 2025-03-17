@@ -135,6 +135,13 @@ export class SendHashEvent implements GameEvent {
   ) {}
 }
 
+export class MoveWarshipIntentEvent implements GameEvent {
+  constructor(
+    public readonly unitId: number,
+    public readonly tile: number,
+  ) {}
+}
+
 export class Transport {
   private socket: WebSocket;
 
@@ -150,12 +157,13 @@ export class Transport {
 
   constructor(
     private lobbyConfig: LobbyConfig,
-    // gameConfig only set on private games
-    private gameConfig: GameConfig | null,
     private eventBus: EventBus,
-    private serverConfig: ServerConfig,
   ) {
-    this.isLocal = lobbyConfig.gameType == GameType.Singleplayer;
+    // If gameRecord is not null, we are replaying an archived game.
+    // For multiplayer games, GameConfig is not known until game starts.
+    this.isLocal =
+      lobbyConfig.gameRecord != null ||
+      lobbyConfig.gameConfig?.gameType == GameType.Singleplayer;
 
     this.eventBus.on(SendAllianceRequestIntentEvent, (e) =>
       this.onSendAllianceRequest(e),
@@ -193,6 +201,9 @@ export class Transport {
     this.eventBus.on(CancelAttackIntentEvent, (e) =>
       this.onCancelAttackIntentEvent(e),
     );
+    this.eventBus.on(MoveWarshipIntentEvent, (e) => {
+      this.onMoveWarshipEvent(e);
+    });
   }
 
   private startPing() {
@@ -237,13 +248,7 @@ export class Transport {
     onconnect: () => void,
     onmessage: (message: ServerMessage) => void,
   ) {
-    this.localServer = new LocalServer(
-      this.serverConfig,
-      this.gameConfig,
-      this.lobbyConfig,
-      onconnect,
-      onmessage,
-    );
+    this.localServer = new LocalServer(this.lobbyConfig, onconnect, onmessage);
     this.localServer.start();
   }
 
@@ -255,7 +260,9 @@ export class Transport {
     this.maybeKillSocket();
     const wsHost = window.location.host;
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const workerPath = this.serverConfig.workerPath(this.lobbyConfig.gameID);
+    const workerPath = this.lobbyConfig.serverConfig.workerPath(
+      this.lobbyConfig.gameID,
+    );
     this.socket = new WebSocket(`${wsProtocol}//${wsHost}/${workerPath}`);
     this.onconnect = onconnect;
     this.onmessage = onmessage;
@@ -273,7 +280,7 @@ export class Transport {
         this.onmessage(serverMsg);
       } catch (error) {
         console.error(
-          `Failed to process server message ${event.data}: ${error}`,
+          `Failed to process server message ${event.data}: ${error}, ${error.stack}`,
         );
       }
     };
@@ -322,9 +329,9 @@ export class Transport {
     );
   }
 
-  leaveGame() {
+  leaveGame(saveFullGame: boolean = false) {
     if (this.isLocal) {
-      this.localServer.endGame();
+      this.localServer.endGame(saveFullGame);
       return;
     }
     this.stopPing();
@@ -503,7 +510,7 @@ export class Transport {
         clientID: this.lobbyConfig.clientID,
         persistentID: this.lobbyConfig.persistentID,
         gameID: this.lobbyConfig.gameID,
-        tick: event.tick,
+        turnNumber: event.tick,
         hash: event.hash,
       });
       this.sendMsg(JSON.stringify(msg));
@@ -522,6 +529,16 @@ export class Transport {
       clientID: this.lobbyConfig.clientID,
       playerID: event.playerID,
       attackID: event.attackID,
+    });
+  }
+
+  private onMoveWarshipEvent(event: MoveWarshipIntentEvent) {
+    this.sendIntent({
+      type: "move_warship",
+      clientID: this.lobbyConfig.clientID,
+      playerID: this.lobbyConfig.playerID,
+      unitId: event.unitId,
+      tile: event.tile,
     });
   }
 
